@@ -5,10 +5,12 @@ use indexmap::IndexMap as Map;
 #[cfg(not(feature = "indexmap"))]
 use std::collections::HashMap as Map;
 
+#[cfg(feature = "async-std")]
+use async_std::{fs as async_fs, path::Path as AsyncPath};
+
 use std::collections::HashMap;
 use std::convert::AsRef;
-use std::fs::File;
-use std::io::prelude::*;
+use std::fmt::Write;
 use std::path::Path;
 use std::{fs, vec};
 
@@ -20,6 +22,7 @@ use std::{fs, vec};
 ///let mut config = Ini::new();
 ///```
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
+#[non_exhaustive]
 pub struct Ini {
     map: Map<String, Map<String, Vec<String>>>,
     default_section: std::string::String,
@@ -27,6 +30,7 @@ pub struct Ini {
     delimiters: Vec<char>,
     boolean_values: HashMap<bool, Vec<String>>,
     case_sensitive: bool,
+    multiline: bool,
 }
 
 ///The `IniDefault` struct serves as a template to create other `Ini` objects from. It can be used to store and load
@@ -83,6 +87,16 @@ pub struct IniDefault {
     ///assert_eq!(default.case_sensitive, false);
     ///```
     pub case_sensitive: bool,
+    ///Denotes if the `Ini` object parses multiline strings.
+    ///## Example
+    ///```rust
+    ///use configparser::ini::Ini;
+    ///
+    ///let mut config = Ini::new();
+    ///let default = config.defaults();
+    ///assert_eq!(default.multiline, false);
+    ///```
+    pub multiline: bool,
 }
 
 impl Default for IniDefault {
@@ -91,6 +105,7 @@ impl Default for IniDefault {
             default_section: "default".to_owned(),
             comment_symbols: vec![';', '#'],
             delimiters: vec!['=', ':'],
+            multiline: false,
             boolean_values: [
                 (
                     true,
@@ -116,9 +131,9 @@ impl Default for IniDefault {
 }
 
 #[cfg(windows)]
-const LINE_ENDING: &'static str = "\r\n";
+const LINE_ENDING: &str = "\r\n";
 #[cfg(not(windows))]
-const LINE_ENDING: &'static str = "\n";
+const LINE_ENDING: &str = "\n";
 
 impl Ini {
     ///Creates a new `Map` of `Map<String, Map<String, Vec<String>>>` type for the struct.
@@ -149,10 +164,10 @@ impl Ini {
     ///```
     ///Returns the struct and stores it in the calling variable.
     pub fn new_cs() -> Ini {
-        let mut defaults = IniDefault::default();
-        defaults.case_sensitive = true;
-
-        Ini::new_from_defaults(defaults)
+        Ini::new_from_defaults(IniDefault {
+            case_sensitive: true,
+            ..Default::default()
+        })
     }
 
     ///Creates a new `Ini` with the given defaults from an existing `IniDefault` object.
@@ -178,6 +193,7 @@ impl Ini {
             delimiters: defaults.delimiters,
             boolean_values: defaults.boolean_values,
             case_sensitive: defaults.case_sensitive,
+            multiline: defaults.multiline,
         }
     }
 
@@ -197,6 +213,7 @@ impl Ini {
             delimiters: self.delimiters.to_owned(),
             boolean_values: self.boolean_values.to_owned(),
             case_sensitive: self.case_sensitive,
+            multiline: self.multiline,
         }
     }
 
@@ -254,6 +271,21 @@ impl Ini {
         self.comment_symbols = symlist.to_vec();
     }
 
+    ///Sets multiline string support.
+    ///It must be set before `load()` or `read()` is called in order to take effect.
+    ///## Example
+    ///```rust
+    ///use configparser::ini::Ini;
+    ///
+    ///let mut config = Ini::new();
+    ///config.set_multiline(true);
+    ///let map = config.load("tests/test.ini").unwrap();
+    ///```
+    ///Returns nothing.
+    pub fn set_multiline(&mut self, multiline: bool) {
+        self.multiline = multiline;
+    }
+
     ///Gets all the sections of the currently-stored `Map` in a vector.
     ///## Example
     ///```rust
@@ -285,21 +317,24 @@ impl Ini {
         &mut self,
         path: T,
     ) -> Result<Map<String, Map<String, Vec<String>>>, String> {
-        let path = path.as_ref();
-        let display = path.display();
-
-        let mut file = match File::open(&path) {
-            Err(why) => return Err(format!("couldn't open {}: {}", display, why)),
-            Ok(file) => file,
-        };
-
-        let mut s = String::new();
-        self.map = match file.read_to_string(&mut s) {
-            Err(why) => return Err(format!("couldn't read {}: {}", display, why)),
-            Ok(_) => match self.parse(s) {
-                Err(why) => return Err(why),
-                Ok(map) => map,
-            },
+        self.map = match self.parse(match fs::read_to_string(&path) {
+            Err(why) => {
+                return Err(format!(
+                    "couldn't read {}: {}",
+                    &path.as_ref().display(),
+                    why
+                ))
+            }
+            Ok(s) => s,
+        }) {
+            Err(why) => {
+                return Err(format!(
+                    "couldn't read {}: {}",
+                    &path.as_ref().display(),
+                    why
+                ))
+            }
+            Ok(map) => map,
         };
         Ok(self.map.clone())
     }
@@ -369,7 +404,11 @@ impl Ini {
     ///Private function that converts the currently stored configuration into a valid ini-syntax string.
     fn unparse(&self) -> String {
         // push key/value pairs in outmap to out string.
-        fn unparse_key_values(out: &mut String, outmap: &Map<String, Vec<String>>) {
+        fn unparse_key_values(
+            out: &mut String,
+            outmap: &Map<String, Vec<String>>,
+            multiline: bool,
+        ) {
             for (key, val) in outmap.iter() {
                 if val.is_empty() {
                     out.push_str(&key);
@@ -378,24 +417,40 @@ impl Ini {
                     for (index, item) in val.iter().enumerate() {
                         out.push_str(&key);
                         out.push('=');
-                        out.push_str(&item);
+                        if multiline {
+                            let mut lines = item.lines();
+
+                            out.push_str(lines.next().unwrap());
+
+                            for line in lines {
+                                out.push_str(LINE_ENDING);
+                                out.push_str("    ");
+                                out.push_str(line);
+                            }
+                        } else {
+                            out.push_str(&item);
+                        }
                         if index + 1 < length {
                             out.push_str(LINE_ENDING);
                         }
                     }
                 }
+
                 out.push_str(LINE_ENDING);
             }
         }
+
         let mut out = String::new();
+
         if let Some(defaultmap) = self.map.get(&self.default_section) {
-            unparse_key_values(&mut out, defaultmap);
+            unparse_key_values(&mut out, defaultmap, self.multiline);
         }
+
         for (section, secmap) in self.map.iter() {
             if section != &self.default_section {
-                out.push_str(&format!("[{}]", section));
+                write!(out, "[{}]", section).unwrap();
                 out.push_str(LINE_ENDING);
-                unparse_key_values(&mut out, secmap);
+                unparse_key_values(&mut out, secmap, self.multiline);
             }
         }
         out
@@ -405,6 +460,8 @@ impl Ini {
     fn parse(&self, input: String) -> Result<Map<String, Map<String, Vec<String>>>, String> {
         let mut map: Map<String, Map<String, Vec<String>>> = Map::new();
         let mut section = self.default_section.clone();
+        let mut current_key: Option<String> = None;
+
         let caser = |val: &str| {
             if self.case_sensitive {
                 val.to_owned()
@@ -412,80 +469,94 @@ impl Ini {
                 val.to_lowercase()
             }
         };
-        for (num, lines) in input.lines().enumerate() {
-            let trimmed = match lines.find(|c: char| self.comment_symbols.contains(&c)) {
-                Some(idx) => lines[..idx].trim(),
-                None => lines.trim(),
+
+        for (num, raw_line) in input.lines().enumerate() {
+            let line = match raw_line.find(|c: char| self.comment_symbols.contains(&c)) {
+                Some(idx) => &raw_line[..idx],
+                None => raw_line,
             };
+
+            let trimmed = line.trim();
+
             if trimmed.is_empty() {
                 continue;
             }
-            match trimmed.find('[') {
-                Some(0) => match trimmed.rfind(']') {
-                    Some(end) => {
-                        section = caser(trimmed[1..end].trim());
-                    }
+
+            match (trimmed.find('['), trimmed.rfind(']')) {
+                (Some(0), Some(end)) => {
+                    section = caser(trimmed[1..end].trim());
+
+                    continue;
+                }
+                (Some(0), None) => {
+                    return Err(format!(
+                        "line {}: Found opening bracket for section name but no closing bracket",
+                        num
+                    ));
+                }
+                _ => {}
+            }
+
+            if line.starts_with(char::is_whitespace) && self.multiline {
+                let key = match current_key.as_ref() {
+                    Some(x) => x,
                     None => {
                         return Err(format!(
-                            "line {}: Found opening bracket for section name but no closing bracket",
-                            num
-                        ));
+                            "line {}: Started with indentation but there is no current entry",
+                            num,
+                        ))
                     }
-                },
-                Some(_) | None => match trimmed.find(&self.delimiters[..]) {
-                    Some(delimiter) => match map.get_mut(&section) {
-                        Some(valmap) => {
-                            let key = caser(trimmed[..delimiter].trim());
-                            let value = trimmed[delimiter + 1..].trim().to_owned();
-                            if key.is_empty() {
-                                return Err(format!(
-                                    "line {}:{}: Key cannot be empty",
-                                    num, delimiter
-                                ));
-                            } else {
-                                let items = valmap.get_mut(&key);
-                                if let Some(items) = items {
-                                    items.push(value);
-                                } else {
-                                    valmap.insert(key, vec![value]);
-                                }
-                            }
+                };
+
+                let valmap = map.entry(section.clone()).or_insert_with(Map::new);
+
+                let val = valmap
+                    .entry(key.clone())
+                    .or_insert_with(|| vec![String::new()]);
+
+                match val.last_mut() {
+                    Some(x) => {
+                        x.push_str(LINE_ENDING);
+                        x.push_str(trimmed);
+                    }
+                    None => {
+                        val.push(format!("{}{}", LINE_ENDING, trimmed));
+                    }
+                }
+
+                continue;
+            }
+
+            let valmap = map.entry(section.clone()).or_insert_with(Map::new);
+
+            match trimmed.find(&self.delimiters[..]) {
+                Some(delimiter) => {
+                    let key = caser(trimmed[..delimiter].trim());
+
+                    if key.is_empty() {
+                        return Err(format!("line {}:{}: Key cannot be empty", num, delimiter));
+                    } else {
+                        current_key = Some(key.clone());
+
+                        let value = trimmed[delimiter + 1..].trim().to_owned();
+
+                        let items = valmap.get_mut(&key);
+                        if let Some(items) = items {
+                            items.push(value);
+                        } else {
+                            valmap.insert(key, vec![value]);
                         }
-                        None => {
-                            let mut valmap: Map<String, Vec<String>> = Map::new();
-                            let key = caser(trimmed[..delimiter].trim());
-                            let value = trimmed[delimiter + 1..].trim().to_owned();
-                            if key.is_empty() {
-                                return Err(format!(
-                                    "line {}:{}: Key cannot be empty",
-                                    num, delimiter
-                                ));
-                            } else {
-                                let items = valmap.get_mut(&key);
-                                if let Some(items) = items {
-                                    items.push(value);
-                                } else {
-                                    valmap.insert(key, vec![value]);
-                                }
-                            }
-                            map.insert(section.clone(), valmap);
-                        }
-                    },
-                    None => match map.get_mut(&section) {
-                        Some(valmap) => {
-                            let key = caser(trimmed);
-                            valmap.insert(key, vec![]);
-                        }
-                        None => {
-                            let mut valmap: Map<String, Vec<String>> = Map::new();
-                            let key = caser(trimmed);
-                            valmap.insert(key, vec![]);
-                            map.insert(section.clone(), valmap);
-                        }
-                    },
-                },
+                    }
+                }
+                None => {
+                    let key = caser(trimmed);
+                    current_key = Some(key.clone());
+
+                    valmap.insert(key, vec![]);
+                }
             }
         }
+
         Ok(map)
     }
 
@@ -894,5 +965,51 @@ impl Ini {
     pub fn remove_key(&mut self, section: &str, key: &str) -> Option<Vec<String>> {
         let (section, key) = self.autocase(section, key);
         self.map.get_mut(&section)?.remove(&key)
+    }
+}
+
+#[cfg(feature = "async-std")]
+impl Ini {
+    ///Loads a file asynchronously from a defined path, parses it and puts the hashmap into our struct.
+    ///At one time, it only stores one configuration, so each call to `load()` or `read()` will clear the existing `Map`, if present.
+    ///
+    ///Usage is similar to `load`, but `.await` must be called after along with the usual async rules.
+    ///
+    ///Returns `Ok(map)` with a clone of the stored `Map` if no errors are thrown or else `Err(error_string)`.
+    ///Use `get_mut_map()` if you want a mutable reference.
+    pub async fn load_async<T: AsRef<AsyncPath>>(
+        &mut self,
+        path: T,
+    ) -> Result<Map<String, Map<String, Option<String>>>, String> {
+        self.map = match self.parse(match async_fs::read_to_string(&path).await {
+            Err(why) => {
+                return Err(format!(
+                    "couldn't read {}: {}",
+                    &path.as_ref().display(),
+                    why
+                ))
+            }
+            Ok(s) => s,
+        }) {
+            Err(why) => {
+                return Err(format!(
+                    "couldn't read {}: {}",
+                    &path.as_ref().display(),
+                    why
+                ))
+            }
+            Ok(map) => map,
+        };
+        Ok(self.map.clone())
+    }
+
+    ///Writes the current configuation to the specified path asynchronously. If a file is not present, it is automatically created for you, if a file already
+    ///exists, it is truncated and the configuration is written to it.
+    ///
+    ///Usage is the same as `write`, but `.await` must be called after along with the usual async rules.
+    ///
+    ///Returns a `std::io::Result<()>` type dependent on whether the write was successful or not.
+    pub async fn write_async<T: AsRef<Path>>(&self, path: T) -> std::io::Result<()> {
+        async_fs::write(path.as_ref(), self.unparse()).await
     }
 }

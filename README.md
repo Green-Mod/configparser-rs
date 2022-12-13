@@ -1,5 +1,5 @@
 # configparser
-[![Build Status](https://github.com/QEDK/configparser-rs/actions/workflows/rust.yaml/badge.svg)](https://github.com/QEDK/configparser-rs/actions/workflows/rust.yaml) [![Crates.io](https://img.shields.io/crates/l/configparser?color=black)](LICENSE-MIT) [![Crates.io](https://img.shields.io/crates/v/configparser?color=black)](https://crates.io/crates/configparser) [![Released API docs](https://docs.rs/configparser/badge.svg)](https://docs.rs/configparser) [![Maintenance](https://img.shields.io/maintenance/yes/2021)](https://github.com/QEDK/configparser-rs)
+[![Build Status](https://github.com/QEDK/configparser-rs/actions/workflows/rust.yaml/badge.svg)](https://github.com/QEDK/configparser-rs/actions/workflows/rust.yaml) [![Crates.io](https://img.shields.io/crates/l/configparser?color=black)](LICENSE-MIT) [![Crates.io](https://img.shields.io/crates/v/configparser?color=black)](https://crates.io/crates/configparser) [![Released API docs](https://docs.rs/configparser/badge.svg)](https://docs.rs/configparser) [![Maintenance](https://img.shields.io/maintenance/yes/2022)](https://github.com/QEDK/configparser-rs)
 
 This crate provides the `Ini` struct which implements a basic configuration language which provides a structure similar to what’s found in Windows' `ini` files. You can use this to write Rust programs which can be customized by end users easily.
 
@@ -29,7 +29,7 @@ strings as well as files.
 You can install this easily via `cargo` by including it in your `Cargo.toml` file like:
 ```TOML
 [dependencies]
-configparser = "3.0.0"
+configparser = "3.0.2"
 ```
 
 ## ➕ Supported datatypes
@@ -171,9 +171,17 @@ The `Ini` struct offers great support for type conversion and type setting safel
 You can activate it by adding it as a feature like this:
 ```TOML
 [dependencies]
-configparser = { version = "3.0.0", features = ["indexmap"] }
+configparser = { version = "3.0.2", features = ["indexmap"] }
 ```
 
+ - *async-std*: Activating the `async-std` feature adds asynchronous functions for reading from (`load_async()`) and
+   writing to (`write_async()`) files using [async-std](https://crates.io/crates/async-std).
+
+You can activate it by adding it as a feature like this:
+```TOML
+[dependencies]
+configparser = { version = "3.0.2", features = ["async-std"] }
+```
 
 ## 📜 License
 
@@ -193,9 +201,6 @@ additional terms or conditions.
 ## 🆕 Changelog
 
 Old changelogs are in [CHANGELOG.md](CHANGELOG.md).
-- 1.0.0
-  - Dropped support for `ini::load()`
-  - Updated tests
 - 2.0.0
   - **BREAKING** Added Python-esque support for `:` as a delimiter.
   - :new: Add support for case-sensitive maps with automatic handling under the hood.
@@ -208,13 +213,22 @@ Old changelogs are in [CHANGELOG.md](CHANGELOG.md).
   - ℹ Only affects current behaviour **iff** your section headers had comments in front of them like, `comment[HEADER]`, you can fix it by adding the comment after the header like `[HEADER]#comment` or otherwise.
   - 🚀 `load()` and `write()` work with `Path`-like arguments now.
   - 📜 Add docs for new struct
-- 3.0.0 (**STABLE**)
+- 3.0.0
   - 😅 **BREAKING** `IniDefault` is now a non-exhaustive struct, this will make future upgrades easier and non-breaking in nature. This change might also have a few implications in updating your existing codebase, please read the [official docs](https://doc.rust-lang.org/reference/attributes/type_system.html#the-non_exhaustive-attribute) for more guidance.
   - `IniDefault` is now internally used for generating defaults, reducing crate size.
   - 🚀 There is now a new optional `indexmap` feature that preserves insertion order of your loaded configurations.
+- 3.0.1
+  - Uses `CRLF` line endings for Windows files.
+  - Bumps crate to 2021 edition.
+  - Adds features to CI pipeline.
+- 3.0.2 (**STABLE**)
+  - Adds support for multi-line key-value pairs.
+  - Adds `async-std` feature for asynchronous file operations.
+  - Some performance optimizations.
 - 4.0.0 (**STABLE**)
   - 🥵 **BREAKING** `HashMap` values are now `Vec<String>` instead of `Option<String>`. This allows the parser to now handle duplicate keys.
 
 ### 🔜 Future plans
 
 - Support for appending sections, coercing them as well.
+- Benchmarking against similar packages.
