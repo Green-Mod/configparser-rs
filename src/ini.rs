@@ -109,14 +109,14 @@ impl Default for IniDefault {
             boolean_values: [
                 (
                     true,
-                    vec!["true", "yes", "t", "y", "on", "1"]
+                    ["true", "yes", "t", "y", "on", "1"]
                         .iter()
                         .map(|&s| s.to_owned())
                         .collect(),
                 ),
                 (
                     false,
-                    vec!["false", "no", "f", "n", "off", "0"]
+                    ["false", "no", "f", "n", "off", "0"]
                         .iter()
                         .map(|&s| s.to_owned())
                         .collect(),
@@ -411,11 +411,11 @@ impl Ini {
         ) {
             for (key, val) in outmap.iter() {
                 if val.is_empty() {
-                    out.push_str(&key);
+                    out.push_str(key);
                 } else {
                     let length = val.len();
                     for (index, item) in val.iter().enumerate() {
-                        out.push_str(&key);
+                        out.push_str(key);
                         out.push('=');
                         if multiline {
                             let mut lines = item.lines();
@@ -428,7 +428,7 @@ impl Ini {
                                 out.push_str(line);
                             }
                         } else {
-                            out.push_str(&item);
+                            out.push_str(item);
                         }
                         if index + 1 < length {
                             out.push_str(LINE_ENDING);
@@ -508,7 +508,7 @@ impl Ini {
                     }
                 };
 
-                let valmap = map.entry(section.clone()).or_insert_with(Map::new);
+                let valmap = map.entry(section.clone()).or_default();
 
                 let val = valmap
                     .entry(key.clone())
@@ -527,7 +527,7 @@ impl Ini {
                 continue;
             }
 
-            let valmap = map.entry(section.clone()).or_insert_with(Map::new);
+            let valmap = map.entry(section.clone()).or_default();
 
             match trimmed.find(&self.delimiters[..]) {
                 Some(delimiter) => {

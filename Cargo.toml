@@ -1,12 +1,14 @@
 [package]
 name = "configparser"
-version = "3.0.2"
-authors = ["QEDK <qedk.en@gmail.com>"]
+version = "3.0.3"
+authors = [
+  "QEDK <qedk.en@gmail.com>",
+  "Giorgio Bertolotti <giorgio@greenmod.it>",
+]
 edition = "2021"
 description = "A simple configuration parsing utility with no dependencies that allows you to parse INI and ini-style syntax. You can use this to write Rust programs which can be customized by end users easily."
-homepage = "https://github.com/QEDK/configparser-rs"
-repository = "https://github.com/QEDK/configparser-rs"
-documentation = "https://docs.rs/configparser"
+homepage = "https://github.com/Green-Mod/configparser-rs"
+repository = "https://github.com/Green-Mod/configparser-rs"
 readme = "README.md"
 license = "MIT OR LGPL-3.0-or-later"
 keywords = ["config", "ini", "settings", "configuration", "parser"]
@@ -19,4 +21,4 @@ maintenance = { status = "actively-developed" }
 
 [dependencies]
 async-std = { version = "1.12.0", optional = true }
-indexmap = { version = "1.9.1", optional = true }
+indexmap = { version = "2.2.6", optional = true }
